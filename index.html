@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rally Countdown Timer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        input, select, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        .countdown {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .player-container {
+            margin: 10px 0;
+        }
+        .share-button {
+            background-color: #4CAF50;
+            color: white;
+            margin-left: 10px;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        #viewer-container {
+            display: none;
+        }
+        .view-mode .config-section {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1 id="title">Rally Countdown Timer</h1>
+    <div class="container config-section">
+        <label for="language-select">🌍 Language / Dil: </label>
+        <select id="language-select" onchange="changeLanguage()">
+            <option value="en" selected>English</option>
+            <option value="tr">Türkçe</option>
+        </select>
+
+        <label for="players-select" id="players-label">Select Number of Players: </label>
+        <select id="players-select" onchange="updatePlayerInputs()">
+            <option value="2">2 Players</option>
+            <option value="3">3 Players</option>
+            <option value="4">4 Players</option>
+            <option value="5">5 Players</option>
+            <option value="6" selected>6 Players</option>
+        </select>
+
+        <div id="players"></div>
+        <button onclick="startRallies()" id="start-button">Start Rallies</button>
+        <button onclick="resetRallies()" id="reset-button">Restart Rallies</button>
+        <div id="result"></div>
+    </div>
+
+    <div id="viewer-container">
+        <h1 id="viewer-title"></h1>
+        <div class="container">
+            <div class="player-container">
+                <strong id="viewer-player-name"></strong>
+                <div id="viewer-countdown"></div>
+                <div id="viewer-final-time"></div>
+            </div>
+            <button onclick="window.location.href = '.';" id="viewer-back-button">Back to Config</button>
+        </div>
+    </div>
+
+    <script>
+        let numberOfPlayers = 6;
+        let countdownIntervals = [];
+        let utcOffset = 0;
+        let language = "en";
+
+        const translations = {
+            en: {
+                title: "Rally Countdown Timer",
+                playersLabel: "Select Number of Players:",
+                playerName: "Player",
+                playerMarch: "March Time (seconds):",
+                startButton: "Start Rallies",
+                resetButton: "Restart Rallies",
+                rallyStart: "Rally Start Times",
+                startsIn: "Starts in",
+                rallyStarted: "Rally Started!",
+                finalRally: "Final Rally Start Time (UTC):",
+                viewerTitle: "Viewing Rally Timer - ",
+                backButton: "Back to Config",
+                shareButton: "Share"
+            },
+            tr: {
+                title: "Miting Geri Sayım Sayacı",
+                playersLabel: "Oyuncu Sayısını Seçin:",
+                playerName: "Oyuncu",
+                playerMarch: "Yürüyüş Süresi (saniye):",
+                startButton: "Mitingleri Başlat",
+                resetButton: "Mitingleri Yeniden Başlat",
+                rallyStart: "Miting Başlangıç Zamanları",
+                startsIn: "Başlıyor",
+                rallyStarted: "Miting Başladı!",
+                finalRally: "Son Miting Başlangıç Zamanı (UTC):",
+                viewerTitle: "Miting Sayacını Görüntüle - ",
+                backButton: "Ayarlara Dön",
+                shareButton: "Paylaş"
+            }
+        };
+
+        async function fetchUTCOffset() {
+            try {
+                const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
+                const data = await response.json();
+                const serverTime = Math.floor(new Date(data.utc_datetime).getTime() / 1000);
+                const localTime = Math.floor(Date.now() / 1000);
+                utcOffset = serverTime - localTime;
+            } catch (error) {
+                console.error('Error fetching UTC time:', error);
+            }
+        }
+
+        function updatePlayerInputs() {
+            numberOfPlayers = parseInt(document.getElementById("players-select").value);
+            const playersDiv = document.getElementById('players');
+            playersDiv.innerHTML = '';
+
+            for (let i = 1; i <= numberOfPlayers; i++) {
+                playersDiv.innerHTML += `
+                    <label>${translations[language].playerName} ${i}:</label>
+                    <input type="text" id="player${i}-name" placeholder="${translations[language].playerName} ${i}" value="${translations[language].playerName} ${i}">
+                    <label>${translations[language].playerMarch}</label>
+                    <input type="number" id="player${i}-march" value="55">
+                `;
+            }
+        }
+
+        function calculateStartTimes(marchTimes) {
+            const rallyTime = 60;
+            const latestFinishTime = Math.max(...marchTimes) + rallyTime;
+            const currentUTC = Math.floor(Date.now() / 1000) + utcOffset;
+            const startTimes = marchTimes.map(marchTime => latestFinishTime - rallyTime - marchTime + 10);
+            const utcStartTimes = startTimes.map(time => currentUTC + time);
+            return { startTimes, utcStartTimes };
+        }
+
+        function startRallies() {
+            let marchTimes = [];
+            let playerNames = [];
+            for (let i = 1; i <= numberOfPlayers; i++) {
+                let marchTime = parseInt(document.getElementById(`player${i}-march`).value);
+                let playerName = document.getElementById(`player${i}-name`).value.trim();
+                marchTimes.push(marchTime);
+                playerNames.push(playerName || `${translations[language].playerName} ${i}`);
+            }
+
+            const { startTimes, utcStartTimes } = calculateStartTimes(marchTimes);
+            const players = playerNames.map((name, index) => ({
+                name,
+                marchTime: marchTimes[index],
+                startTime: startTimes[index],
+                utcStartTime: utcStartTimes[index],
+            }));
+            players.sort((a, b) => b.marchTime - a.marchTime);
+
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `<h3>${translations[language].rallyStart}</h3>`;
+            players.forEach((player, index) => {
+                const rallyTimeUTC = new Date(player.utcStartTime * 1000).toISOString().replace('T', ' ').substring(0, 19);
+                const shareLink = generateShareLink(player.utcStartTime, player.name);
+                resultDiv.innerHTML += `
+                    <div class="player-container">
+                        <strong>${player.name}</strong> - ${translations[language].startsIn}: 
+                        <span id="countdown-${index}">${player.startTime} seconds</span>
+                        <button class="share-button" onclick="copyToClipboard('${shareLink}')">${translations[language].shareButton}</button>
+                        <br>${translations[language].finalRally} <strong>${rallyTimeUTC}</strong>
+                    </div>
+                `;
+            });
+
+            startAllCountdowns(players);
+        }
+
+        function startAllCountdowns(players) {
+            countdownIntervals.forEach(clearInterval);
+            countdownIntervals = [];
+            players.forEach((player, index) => {
+                let countdown = player.startTime;
+                const interval = setInterval(() => {
+                    if (countdown > 0) {
+                        countdown--;
+                        document.getElementById(`countdown-${index}`).innerText = `${countdown} seconds`;
+                    } else {
+                        clearInterval(interval);
+                        document.getElementById(`countdown-${index}`).innerText = translations[language].rallyStarted;
+                    }
+                }, 1000);
+                countdownIntervals.push(interval);
+            });
+        }
+
+        function resetRallies() {
+            countdownIntervals.forEach(clearInterval);
+            document.getElementById("result").innerHTML = "";
+            updatePlayerInputs();
+        }
+
+        function changeLanguage() {
+            language = document.getElementById("language-select").value;
+            document.getElementById("title").innerText = translations[language].title;
+            document.getElementById("players-label").innerText = translations[language].playersLabel;
+            document.getElementById("start-button").innerText = translations[language].startButton;
+            document.getElementById("reset-button").innerText = translations[language].resetButton;
+            updatePlayerInputs();
+        }
+
+        function generateShareLink(utcStartTime, playerName) {
+            const baseUrl = window.location.href.split('?')[0];
+            const params = new URLSearchParams({
+                view: '1',
+                utc: utcStartTime,
+                name: encodeURIComponent(playerName)
+            });
+            return `${baseUrl}?${params.toString()}`;
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Link copied to clipboard!');
+            });
+        }
+
+        function startViewerMode() {
+            const params = new URLSearchParams(window.location.search);
+            const utcStartTime = parseInt(params.get('utc'));
+            const playerName = decodeURIComponent(params.get('name'));
+
+            if (!utcStartTime || !playerName) return;
+
+            document.querySelector('.config-section').style.display = 'none';
+            document.getElementById('viewer-container').style.display = 'block';
+            document.getElementById('viewer-title').textContent = translations[language].viewerTitle + playerName;
+            document.getElementById('viewer-back-button').textContent = translations[language].backButton;
+
+            const finalTime = new Date(utcStartTime * 1000).toISOString().replace('T', ' ').substring(0, 19);
+            document.getElementById('viewer-final-time').innerHTML = 
+                `${translations[language].finalRally} <strong>${finalTime}</strong>`;
+
+            startViewerCountdown(utcStartTime);
+        }
+
+        function startViewerCountdown(utcStartTime) {
+            function update() {
+                const currentUTC = Math.floor(Date.now() / 1000);
+                let remaining = utcStartTime - currentUTC;
+                const countdownEl = document.getElementById('viewer-countdown');
+                
+                if (remaining <= 0) {
+                    countdownEl.textContent = translations[language].rallyStarted;
+                    return;
+                }
+                
+                countdownEl.textContent = `${remaining} ${translations[language].startsIn}`;
+                setTimeout(update, 1000);
+            }
+            update();
+        }
+
+        // Initialize viewer mode if parameters exist
+        window.onload = () => {
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('view')) {
+                startViewerMode();
+            } else {
+                fetchUTCOffset();
+                updatePlayerInputs();
+            }
+        };
+    </script>
+</body>
+</html>
